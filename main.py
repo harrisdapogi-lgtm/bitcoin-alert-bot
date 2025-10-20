@@ -23,7 +23,7 @@ API_URL = "https://api.coindesk.com/v1/bpi/currentprice/BTC.json"
 app = Flask(__name__)
 
 # ========== MODEL LOADING ==========
-model = load_model(MODEL_FILE)
+model = load_model(MODEL_FILE, compile=False)
 from keras.saving import register_keras_serializable
 
 # Fix: allow custom deserialization of "mse" metric
@@ -79,4 +79,5 @@ if __name__ == "__main__":
     t = threading.Thread(target=check_price_loop)
     t.start()
     app.run(host="0.0.0.0", port=10000)
+
 
