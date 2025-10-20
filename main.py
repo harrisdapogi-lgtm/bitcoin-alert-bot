@@ -24,9 +24,14 @@ app = Flask(__name__)
 
 # ========== MODEL LOADING ==========
 model = load_model(MODEL_FILE)
-scaler = MinMaxScaler(feature_range=(0, 1))
-scaler.min_, scaler.scale_ = np.load(SCALER_FILE, allow_pickle=True)
-print("✅ Model and scaler loaded successfully.")
+from keras.saving import register_keras_serializable
+
+# Fix: allow custom deserialization of "mse" metric
+@register_keras_serializable()
+def mse(y_true, y_pred):
+    return ((y_true - y_pred) ** 2).mean()
+
+model = load_model(MODEL_FILE, custom_objects={'mse': mse}, compile=False)
 
 # ========== PRICE PREDICTOR ==========
 def get_bitcoin_price():
@@ -74,3 +79,4 @@ if __name__ == "__main__":
     t = threading.Thread(target=check_price_loop)
     t.start()
     app.run(host="0.0.0.0", port=10000)
+
