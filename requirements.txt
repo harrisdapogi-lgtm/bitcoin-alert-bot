@@ -4,3 +4,5 @@ flask
 requests
 numpy
 apscheduler
+pytz
+gunicorn
