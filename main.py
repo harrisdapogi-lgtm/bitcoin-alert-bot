@@ -26,28 +26,46 @@ API_URL = "https://api.coindesk.com/v1/bpi/currentprice/BTC.json"
 # ============================================================
 # 🕗 Daily Email Report Scheduler (8 AM Philippine Time)
 # ============================================================
-from apscheduler.schedulers.background import BackgroundScheduler
-from datetime import datetime, timedelta
-import pytz
 
+from apscheduler.schedulers.background import BackgroundScheduler
+import pytz
+from datetime import datetime
+
+# Import your email sending function here
+# Example:
+# from email_alert import send_daily_email
+
+# Set Philippine timezone
 PH_TZ = pytz.timezone("Asia/Manila")
 
-def send_daily_report():
-    try:
-        current_time = datetime.now(PH_TZ).strftime("%Y-%m-%d %H:%M")
-        subject = f"📊 Bitcoin Daily Report — {current_time}"
-        body = f"Automated daily Bitcoin update at {current_time} (Philippine Time)."
-        send_email_alert(subject, body)
-        print("✅ Daily report email sent at", current_time)
-    except Exception as e:
-        print("❌ Failed to send daily report:", e)
-
-# Start scheduler
+# Initialize scheduler with PH timezone
 scheduler = BackgroundScheduler(timezone=PH_TZ)
-scheduler.add_job(send_daily_report, 'cron', hour=8, minute=0)  # 8:00 AM PH time
+
+# Schedule the email to run every day at 8:00 AM PH time
+scheduler.add_job(
+    func=send_daily_email,      # function that sends the email
+    trigger='cron',
+    hour=8,
+    minute=0,
+    id='daily_email_job',
+    replace_existing=True
+)
+
+# Start the scheduler
 scheduler.start()
 
+print("✅ Daily email scheduler started — runs every 8:00 AM Asia/Manila.")
+
+# Keep the app running (important for Render)
+from flask import Flask
 app = Flask(__name__)
+
+@app.route('/')
+def index():
+    return f"Server running. Time now: {datetime.now(PH_TZ).strftime('%Y-%m-%d %H:%M:%S %Z')}"
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=10000)
 
 # ========== LOAD MODEL ==========
 model = load_model(MODEL_FILE, compile=False)
@@ -127,6 +145,7 @@ if __name__ == "__main__":
     t = threading.Thread(target=monitor_bitcoin)
     t.start()
     app.run(host="0.0.0.0", port=10000)
+
 
 
 
