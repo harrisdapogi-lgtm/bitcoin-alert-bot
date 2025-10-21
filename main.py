@@ -23,6 +23,30 @@ ALERT_THRESHOLD = -3    # % drop for alert
 DAILY_REPORT_HOUR = 0   # UTC hour for daily summary (0 = midnight)
 API_URL = "https://api.coindesk.com/v1/bpi/currentprice/BTC.json"
 
+# ============================================================
+# 🕗 Daily Email Report Scheduler (8 AM Philippine Time)
+# ============================================================
+from apscheduler.schedulers.background import BackgroundScheduler
+from datetime import datetime, timedelta
+import pytz
+
+PH_TZ = pytz.timezone("Asia/Manila")
+
+def send_daily_report():
+    try:
+        current_time = datetime.now(PH_TZ).strftime("%Y-%m-%d %H:%M")
+        subject = f"📊 Bitcoin Daily Report — {current_time}"
+        body = f"Automated daily Bitcoin update at {current_time} (Philippine Time)."
+        send_email_alert(subject, body)
+        print("✅ Daily report email sent at", current_time)
+    except Exception as e:
+        print("❌ Failed to send daily report:", e)
+
+# Start scheduler
+scheduler = BackgroundScheduler(timezone=PH_TZ)
+scheduler.add_job(send_daily_report, 'cron', hour=8, minute=0)  # 8:00 AM PH time
+scheduler.start()
+
 app = Flask(__name__)
 
 # ========== LOAD MODEL ==========
@@ -103,5 +127,6 @@ if __name__ == "__main__":
     t = threading.Thread(target=monitor_bitcoin)
     t.start()
     app.run(host="0.0.0.0", port=10000)
+
 
 
