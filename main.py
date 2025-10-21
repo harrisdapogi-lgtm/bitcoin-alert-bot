@@ -16,7 +16,7 @@ SCALER_FILE = "btc_scaler.npy"
 
 EMAIL_SENDER = os.getenv("harrisdapogi@gmail.com")
 EMAIL_PASSWORD = os.getenv("cfpf dipr dazt vdda")
-EMAIL_RECEIVER = os.getenv("harrisdpogi@gmail.com")
+EMAIL_RECEIVER = os.getenv("harrisdapogi@gmail.com")
 
 CHECK_INTERVAL = 3600   # hourly price check
 ALERT_THRESHOLD = -3    # % drop for alert
@@ -103,4 +103,5 @@ if __name__ == "__main__":
     t = threading.Thread(target=monitor_bitcoin)
     t.start()
     app.run(host="0.0.0.0", port=10000)
+
 
