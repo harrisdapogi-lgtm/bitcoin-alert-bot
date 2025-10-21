@@ -13,7 +13,7 @@ from email.mime.text import MIMEText
 # CONFIGURATION
 # ============================================================
 
-MODEL_FILE = "btc_model.h5"
+MODEL_FILE = "btc_predictor.h5"
 SCALER_FILE = "btc_scaler.npy"
 
 EMAIL_ADDRESS = os.environ.get("harrisdapogi@gmail.com") or "your_email@gmail.com"
@@ -100,3 +100,4 @@ scheduler.start()
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
+
