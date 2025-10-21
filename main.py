@@ -1,151 +1,102 @@
 import os
-import smtplib
-import time
-import requests
 import numpy as np
-import threading
-from datetime import datetime, timedelta
+import tensorflow as tf
 from tensorflow.keras.models import load_model
-from sklearn.preprocessing import MinMaxScaler
-from email.mime.text import MIMEText
 from flask import Flask
+from apscheduler.schedulers.background import BackgroundScheduler
+from datetime import datetime
+import pytz
+import smtplib
+from email.mime.text import MIMEText
 
-# ========== CONFIG ==========
-MODEL_FILE = "btc_predictor.h5"   # or .keras if you resaved
+# ============================================================
+# CONFIGURATION
+# ============================================================
+
+MODEL_FILE = "btc_model.h5"
 SCALER_FILE = "btc_scaler.npy"
 
-EMAIL_SENDER = os.getenv("harrisdapogi@gmail.com")
-EMAIL_PASSWORD = os.getenv("cfpf dipr dazt vdda")
-EMAIL_RECEIVER = os.getenv("harrisdapogi@gmail.com")
-
-CHECK_INTERVAL = 3600   # hourly price check
-ALERT_THRESHOLD = -3    # % drop for alert
-DAILY_REPORT_HOUR = 0   # UTC hour for daily summary (0 = midnight)
-API_URL = "https://api.coindesk.com/v1/bpi/currentprice/BTC.json"
+EMAIL_ADDRESS = os.environ.get("harrisdapogi@gmail.com") or "your_email@gmail.com"
+EMAIL_PASSWORD = os.environ.get("cfpf dipr dazt vdda") or "your_app_password"
+RECEIVER_EMAIL = os.environ.get("harrisdapogi@gmail.com") or "receiver_email@gmail.com"
 
 # ============================================================
-# 🕗 Daily Email Report Scheduler (8 AM Philippine Time)
+# INITIALIZATION
 # ============================================================
 
-from apscheduler.schedulers.background import BackgroundScheduler
-import pytz
-from datetime import datetime
-
-# Import your email sending function here
-# Example:
-# from email_alert import send_daily_email
-
-# Set Philippine timezone
-PH_TZ = pytz.timezone("Asia/Manila")
-
-# Initialize scheduler with PH timezone
-scheduler = BackgroundScheduler(timezone=PH_TZ)
-
-# Schedule the email to run every day at 8:00 AM PH time
-scheduler.add_job(
-    func=send_daily_email,      # function that sends the email
-    trigger='cron',
-    hour=8,
-    minute=0,
-    id='daily_email_job',
-    replace_existing=True
-)
-
-# Start the scheduler
-scheduler.start()
-
-print("✅ Daily email scheduler started — runs every 8:00 AM Asia/Manila.")
-
-# Keep the app running (important for Render)
-from flask import Flask
 app = Flask(__name__)
+
+# Load model & scaler
+if os.path.exists(MODEL_FILE) and os.path.exists(SCALER_FILE):
+    model = load_model(MODEL_FILE)
+    scaler_data = np.load(SCALER_FILE, allow_pickle=True)
+    # Handle tuple structure from save
+    if isinstance(scaler_data, np.ndarray) and len(scaler_data) == 2:
+        min_, scale_ = scaler_data
+    else:
+        min_, scale_ = scaler_data.item().get("min_"), scaler_data.item().get("scale_")
+    print("✅ Model & scaler loaded successfully.")
+else:
+    raise FileNotFoundError("❌ Model or scaler not found in your Render project folder.")
+
+# ============================================================
+# EMAIL FUNCTION
+# ============================================================
+
+def send_email(subject, body):
+    """Send email via Gmail SMTP."""
+    try:
+        msg = MIMEText(body)
+        msg["Subject"] = subject
+        msg["From"] = EMAIL_ADDRESS
+        msg["To"] = RECEIVER_EMAIL
+
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
+            smtp.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
+            smtp.send_message(msg)
+        print("📧 Email sent successfully.")
+    except Exception as e:
+        print(f"❌ Email failed: {e}")
+
+# ============================================================
+# DAILY EMAIL TASK
+# ============================================================
+
+def send_daily_email():
+    """Sends a Bitcoin summary email daily."""
+    subject = "Daily Bitcoin Alert 📊"
+    body = f"Good morning! Here's your Bitcoin update for {datetime.now(pytz.timezone('Asia/Manila')).strftime('%Y-%m-%d %H:%M')}."
+    send_email(subject, body)
+
+# ============================================================
+# FLASK ROUTE
+# ============================================================
 
 @app.route('/')
 def index():
-    return f"Server running. Time now: {datetime.now(PH_TZ).strftime('%Y-%m-%d %H:%M:%S %Z')}"
+    return "🚀 Bitcoin Alert Bot is running on Render!"
 
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
+# ============================================================
+# SCHEDULER CONFIG
+# ============================================================
 
-# ========== LOAD MODEL ==========
-model = load_model(MODEL_FILE, compile=False)
-scaler = MinMaxScaler(feature_range=(0, 1))
-scaler.min_, scaler.scale_ = np.load(SCALER_FILE, allow_pickle=True)
-print("✅ Model and scaler loaded successfully.")
+scheduler = BackgroundScheduler(timezone='Asia/Manila')
 
-# ========== HELPER FUNCTIONS ==========
-def get_bitcoin_price():
-    """Fetch current Bitcoin price (USD)."""
-    data = requests.get(API_URL).json()
-    return float(data["bpi"]["USD"]["rate"].replace(",", ""))
+# Schedule daily email at 8 AM Philippine time
+scheduler.add_job(
+    func=send_daily_email,
+    trigger='cron',
+    hour=8,
+    minute=0,
+    timezone='Asia/Manila'
+)
 
-def send_email(subject, message):
-    """Send an email alert via Gmail."""
-    msg = MIMEText(message)
-    msg["Subject"] = subject
-    msg["From"] = EMAIL_SENDER
-    msg["To"] = EMAIL_RECEIVER
+scheduler.start()
 
-    with smtplib.SMTP("smtp.gmail.com", 587) as server:
-        server.starttls()
-        server.login(EMAIL_SENDER, EMAIL_PASSWORD)
-        server.send_message(msg)
-    print(f"📧 Sent email: {subject}")
+# ============================================================
+# RUN APP
+# ============================================================
 
-# ========== MAIN MONITOR ==========
-def monitor_bitcoin():
-    print("🔁 Starting Bitcoin alert loop...")
-    last_price = get_bitcoin_price()
-    last_report_date = None
-
-    while True:
-        try:
-            current_price = get_bitcoin_price()
-            percent_change = ((current_price - last_price) / last_price) * 100
-
-            # --- Hourly check for alerts ---
-            if percent_change <= ALERT_THRESHOLD:
-                send_email(
-                    "📉 Bitcoin Price Drop Alert!",
-                    f"BTC dropped by {percent_change:.2f}%\nCurrent price: ${current_price:,.2f}"
-                )
-
-            print(f"[{datetime.utcnow()}] BTC: ${current_price:,.2f} | Δ {percent_change:.2f}%")
-
-            last_price = current_price
-
-            # --- Daily report at midnight UTC ---
-            now = datetime.utcnow()
-            if now.hour == DAILY_REPORT_HOUR and (not last_report_date or now.date() != last_report_date):
-                yesterday_price = get_bitcoin_price()
-                change_24h = ((current_price - yesterday_price) / yesterday_price) * 100
-                direction = "📈 UP" if change_24h > 0 else "📉 DOWN"
-
-                summary = (
-                    f"Daily Bitcoin Summary ({now.date()} UTC)\n\n"
-                    f"Price: ${current_price:,.2f}\n"
-                    f"Change (24h): {change_24h:.2f}% {direction}\n"
-                    f"Threshold Alert: {ALERT_THRESHOLD}%\n\n"
-                    f"Bot running on Render ✅"
-                )
-                send_email("📊 Daily Bitcoin Summary", summary)
-                last_report_date = now.date()
-
-            time.sleep(CHECK_INTERVAL)
-
-        except Exception as e:
-            print("⚠️ Error:", e)
-            time.sleep(60)
-
-@app.route("/")
-def home():
-    return "✅ Bitcoin Alert Bot with Daily Email Summary is running on Render.com"
-
-if __name__ == "__main__":
-    t = threading.Thread(target=monitor_bitcoin)
-    t.start()
-    app.run(host="0.0.0.0", port=10000)
-
-
-
-
+if __name__ == '__main__':
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port)
