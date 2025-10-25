@@ -1,8 +1,5 @@
-tensorflow
-scikit-learn
-flask
-requests
-numpy
-apscheduler
-pytz
-gunicorn
+tensorflow==2.15.0
+numpy==1.26.4
+pandas==2.2.2
+scikit-learn==1.4.0
+yfinance==0.2.48
