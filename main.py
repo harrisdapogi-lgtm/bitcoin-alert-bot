@@ -96,15 +96,23 @@ pred_df = pd.DataFrame({"Date": future_dates, "Predicted_Close": predictions})
 # ============================================================
 # 4️⃣ Compare with previous predictions (if any)
 # ============================================================
+merged = pd.DataFrame()
+
 if os.path.exists(PREDICTION_FILE):
-    old_df = pd.read_csv(PREDICTION_FILE)
-    merged = pd.merge(old_df, df[["Date", "Close"]], on="Date", how="left")
-    merged.rename(columns={"Close": "Actual_Close"}, inplace=True)
-    merged["Error_%"] = np.abs(merged["Predicted_Close"] - merged["Actual_Close"]) / merged["Actual_Close"] * 100
-    print("\n📊 Comparison of previous predictions:")
-    print(merged.tail(10))
+    try:
+        if os.path.getsize(PREDICTION_FILE) > 0:
+            old_df = pd.read_csv(PREDICTION_FILE)
+            merged = pd.merge(old_df, df[["Date", "Close"]], on="Date", how="left")
+            merged.rename(columns={"Close": "Actual_Close"}, inplace=True)
+            merged["Error_%"] = np.abs(merged["Predicted_Close"] - merged["Actual_Close"]) / merged["Actual_Close"] * 100
+            print("\n📊 Comparison of previous predictions:")
+            print(merged.tail(10))
+        else:
+            print("⚠️ predictions.csv is empty — starting fresh.")
+    except Exception as e:
+        print(f"⚠️ Could not read existing predictions.csv: {e}")
 else:
-    merged = pd.DataFrame()
+    print("ℹ️ No existing predictions.csv found — creating new file.")
 
 # ============================================================
 # 5️⃣ Save predictions to CSV
@@ -125,3 +133,4 @@ try:
     print("✅ Auto-commit pushed successfully!")
 except subprocess.CalledProcessError:
     print("⚠️ No changes to commit or push.")
+
