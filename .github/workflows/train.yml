@@ -14,7 +14,7 @@ jobs:
         with:
           python-version: '3.10'
       - run: pip install tensorflow scikit-learn pandas numpy yfinance requests
-      - run: python train_model.py
+      - run: python trainer.py
       - uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: "🤖 Auto-trained Bitcoin model"
