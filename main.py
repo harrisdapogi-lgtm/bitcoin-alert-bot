@@ -2,11 +2,15 @@ import os
 import numpy as np
 import pandas as pd
 import requests
+import subprocess
+import yfinance as yf
 from datetime import datetime, timedelta
 from tensorflow.keras.models import load_model
 from sklearn.preprocessing import MinMaxScaler
-import yfinance as yf
 
+# ============================================================
+# Configuration
+# ============================================================
 MODEL_FILE = "btc_model.keras"
 SCALER_MIN = "btc_scaler.npy"
 SCALER_MAX = "btc_scaler_max.npy"
@@ -15,7 +19,7 @@ LOOKBACK = 10
 PREDICT_DAYS = 5
 
 # ============================================================
-# 1️⃣ Data fetching — 3 fallback sources, no API key needed
+# 1️⃣ Fetch Bitcoin data (Coindesk → CoinGecko → Yahoo Finance)
 # ============================================================
 def get_bitcoin_data():
     end_date = datetime.today().date()
@@ -58,6 +62,7 @@ def get_bitcoin_data():
     except Exception as e:
         raise RuntimeError("❌ All data sources failed.") from e
 
+
 # ============================================================
 # 2️⃣ Load model and scalers
 # ============================================================
@@ -72,7 +77,7 @@ scaler.scale_ = 1 / (scaler.data_max_ - scaler.data_min_)
 scaler.min_ = -scaler.data_min_ * scaler.scale_
 
 # ============================================================
-# 3️⃣ Prepare latest data and predict next 5 days
+# 3️⃣ Prepare latest data and make 5-day predictions
 # ============================================================
 df = get_bitcoin_data()
 last_close = df["Close"].values[-LOOKBACK:]
@@ -83,14 +88,13 @@ for i in range(PREDICT_DAYS):
     pred_scaled = model.predict(scaled_last, verbose=0)
     pred_price = scaler.inverse_transform(pred_scaled)[0, 0]
     predictions.append(pred_price)
-    new_scaled = np.append(scaled_last[:, 1:, :], pred_scaled.reshape(1, 1, 1), axis=1)
-    scaled_last = new_scaled
+    scaled_last = np.append(scaled_last[:, 1:, :], pred_scaled.reshape(1, 1, 1), axis=1)
 
 future_dates = [df["Date"].iloc[-1] + timedelta(days=i + 1) for i in range(PREDICT_DAYS)]
 pred_df = pd.DataFrame({"Date": future_dates, "Predicted_Close": predictions})
 
 # ============================================================
-# 4️⃣ Compare with previous actuals if available
+# 4️⃣ Compare with previous predictions (if any)
 # ============================================================
 if os.path.exists(PREDICTION_FILE):
     old_df = pd.read_csv(PREDICTION_FILE)
@@ -108,3 +112,16 @@ else:
 pred_df.to_csv(PREDICTION_FILE, index=False)
 print("\n✅ New predictions saved to predictions.csv")
 print(pred_df)
+
+# ============================================================
+# 6️⃣ Auto-commit results back to GitHub
+# ============================================================
+try:
+    subprocess.run(["git", "config", "--global", "user.name", "github-actions"], check=True)
+    subprocess.run(["git", "config", "--global", "user.email", "actions@github.com"], check=True)
+    subprocess.run(["git", "add", PREDICTION_FILE], check=True)
+    subprocess.run(["git", "commit", "-m", f"🕒 Auto update predictions on {datetime.now().strftime('%Y-%m-%d %H:%M')}"], check=True)
+    subprocess.run(["git", "push"], check=True)
+    print("✅ Auto-commit pushed successfully!")
+except subprocess.CalledProcessError:
+    print("⚠️ No changes to commit or push.")
