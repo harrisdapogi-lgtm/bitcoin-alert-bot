@@ -1,78 +1,102 @@
 import numpy as np
 import pandas as pd
-import yfinance as yf
-from datetime import datetime, timedelta
+import requests
+import json
+import datetime
 from tensorflow.keras.models import model_from_json
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import MinMaxScaler
 import os
 
 # ============================================================
-# Load Model + Scaler
+# CONFIG
 # ============================================================
 MODEL_JSON = "btc_model.json"
 MODEL_WEIGHTS = "btc_model_weights.h5"
 SCALER_FILE = "btc_scaler.npy"
-CSV_FILE = "predictions.csv"
+PREDICTIONS_CSV = "predictions.csv"
+DAYS_TO_PREDICT = 5
 
-if not all(os.path.exists(f) for f in [MODEL_JSON, MODEL_WEIGHTS, SCALER_FILE]):
+# ============================================================
+# LOAD MODEL AND SCALER
+# ============================================================
+if not (os.path.exists(MODEL_JSON) and os.path.exists(MODEL_WEIGHTS) and os.path.exists(SCALER_FILE)):
     raise FileNotFoundError("❌ Model or scaler files missing in repo.")
 
-with open(MODEL_JSON, "r") as f:
-    model = model_from_json(f.read())
+# ✅ FIXED: Read model JSON as text string, not as dict
+with open(MODEL_JSON, "r") as json_file:
+    model_json_str = json_file.read()
+
+model = model_from_json(model_json_str)
 model.load_weights(MODEL_WEIGHTS)
-print("✅ Model loaded successfully.")
 
-scaler_params = np.load(SCALER_FILE, allow_pickle=True)
-scaler = StandardScaler()
-scaler.mean_, scaler.scale_ = scaler_params
-print("✅ Scaler loaded successfully.")
+# Load scaler
+scaler_data = np.load(SCALER_FILE, allow_pickle=True)
+scaler = MinMaxScaler(feature_range=(0, 1))
+scaler.min_, scaler.scale_ = scaler_data
 
-# ============================================================
-# Get Latest BTC Data
-# ============================================================
-df = yf.download("BTC-USD", period="60d", interval="1d")[["Close"]]
-df = df.dropna()
-scaled_data = scaler.transform(df.values)
-
-# Use last 10 days as model input
-X_input = scaled_data[-10:].reshape(1, 10, 1)
+print("✅ Model & scaler loaded successfully.")
 
 # ============================================================
-# Predict Next 5 Days
+# FETCH LATEST DATA (Bitcoin)
 # ============================================================
-predictions_scaled = []
-current_input = X_input.copy()
+def fetch_btc_data():
+    url = "https://api.coindesk.com/v1/bpi/historical/close.json"
+    end = datetime.date.today()
+    start = end - datetime.timedelta(days=60)
+    response = requests.get(f"{url}?start={start}&end={end}")
+    data = response.json()["bpi"]
+    df = pd.DataFrame(list(data.items()), columns=["date", "close"])
+    df["date"] = pd.to_datetime(df["date"])
+    df.sort_values("date", inplace=True)
+    return df
 
-for _ in range(5):
-    next_scaled = model.predict(current_input, verbose=0)[0, 0]
-    predictions_scaled.append(next_scaled)
-    current_input = np.append(current_input[:, 1:, :], [[[next_scaled]]], axis=1)
-
-predictions = scaler.inverse_transform(np.array(predictions_scaled).reshape(-1, 1)).flatten()
-dates = [datetime.now() + timedelta(days=i + 1) for i in range(5)]
+df = fetch_btc_data()
+print(f"📈 Loaded {len(df)} days of BTC data.")
 
 # ============================================================
-# Save & Compare
+# PREPARE INPUT
 # ============================================================
-new_data = pd.DataFrame({
-    "date": dates,
-    "predicted_close": predictions,
-    "actual_close": [None] * 5
-})
+data_scaled = scaler.fit_transform(df["close"].values.reshape(-1, 1))
+lookback = 10
 
-# Load old predictions if exist
-if os.path.exists(CSV_FILE):
-    old = pd.read_csv(CSV_FILE)
-    combined = pd.concat([old, new_data]).drop_duplicates(subset=["date"], keep="last")
+X_input = data_scaled[-lookback:].reshape(1, lookback, 1)
+predictions = []
+
+for _ in range(DAYS_TO_PREDICT):
+    pred = model.predict(X_input)
+    predictions.append(pred[0, 0])
+    X_input = np.append(X_input[:, 1:, :], [[pred]], axis=1)
+
+pred_prices = scaler.inverse_transform(np.array(predictions).reshape(-1, 1)).flatten()
+
+# ============================================================
+# SAVE RESULTS
+# ============================================================
+pred_dates = [df["date"].iloc[-1] + datetime.timedelta(days=i+1) for i in range(DAYS_TO_PREDICT)]
+pred_df = pd.DataFrame({"date": pred_dates, "predicted": pred_prices})
+
+# Try fetching actuals for comparison
+try:
+    actual_df = fetch_btc_data()
+    merged = pd.merge(pred_df, actual_df, on="date", how="left", suffixes=("_pred", "_actual"))
+    merged["error_%"] = abs(merged["predicted"] - merged["close"]) / merged["close"] * 100
+    merged.rename(columns={"close": "actual"}, inplace=True)
+except Exception:
+    merged = pred_df
+    merged["actual"] = np.nan
+    merged["error_%"] = np.nan
+
+# Append to CSV
+if os.path.exists(PREDICTIONS_CSV):
+    old = pd.read_csv(PREDICTIONS_CSV)
+    final = pd.concat([old, merged]).drop_duplicates(subset=["date"], keep="last")
 else:
-    combined = new_data
+    final = merged
 
-# Update actuals where available
-actual_data = df.reset_index()[["Date", "Close"]]
-for i, row in combined.iterrows():
-    match = actual_data.loc[actual_data["Date"] == pd.to_datetime(row["date"]).normalize()]
-    if not match.empty:
-        combined.at[i, "actual_close"] = match["Close"].values[0]
+final.to_csv(PREDICTIONS_CSV, index=False)
+print("💾 Saved predictions to predictions.csv")
 
-combined.to_csv(CSV_FILE, index=False)
-print("✅ Predictions saved to predictions.csv")
+# ============================================================
+# DISPLAY PREVIEW
+# ============================================================
+print(final.tail(10))
